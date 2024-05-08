@@ -1,3 +1,5 @@
+import functools
+
 import numpy as np
 import copy, random
 import os
@@ -60,7 +62,7 @@ class GAMMA(object):
         self.area_pebuf_only=False
         self.external_area_model = False
 
-    def reset_hw_parm(self, l1_size=None, l2_size=None, num_pe=None, NocBW=None, map_cstr=None, pe_limit=None,area_pebuf_only=None, external_area_model=None, offchipBW=None):
+    def reset_hw_parm(self, l1_size=None, l2_size=None, num_pe=None, NocBW=None, map_cstr=None, pe_limit=None,area_pebuf_only=None, external_area_model=None, offchipBW=None, slevel_max=None, slevel_min=None):
         if l1_size:
             self.l1_size=l1_size if l1_size > 0 else 2**30
         if l2_size:
@@ -79,6 +81,12 @@ class GAMMA(object):
             self.area_pebuf_only = area_pebuf_only
         if external_area_model:
             self.external_area_model = external_area_model
+        if map_cstr:
+            self.map_cstr = map_cstr
+        if slevel_min:
+            self.slevel_min = slevel_min
+        if slevel_max:
+            self.slevel_max = slevel_max
 
     def get_dimension_factors(self, dimension_dict):
         dimension_factors = dict()
@@ -548,7 +556,7 @@ class GAMMA(object):
                 for i in range(1, 7):
                     population[idx][i + level * 7][1] = 1
 
-    def reinit_pop(self,pool, num_population,  stage_idx, best_sol_1st, init_pop, cur_gen=-1, bias= None, num_all_unit=2):
+    def reinit_pop(self,pool, num_population,  stage_idx, best_sol_1st, init_pop, cur_gen=-1, bias= None, num_all_unit=2, precision=None):
         population = [self.create_genome_fixedSL(bias=bias) for _ in range(num_population)]
         #====always create a base unit pop=======
         self.create_unit_base_pops(population, num_all_unit=num_all_unit)
@@ -565,7 +573,8 @@ class GAMMA(object):
         self.num_parents = num_population
         self.comform_to_cstr(population)
         self.fitness = np.ones((max(num_population, len(population)), len(self.fitness_objective)), float)
-        self.evaluate(pool=pool, population=population,cur_gen=cur_gen)
+
+        self.evaluate(pool=pool, population=population,cur_gen=cur_gen, precision=precision)
         return population
 
 
@@ -640,14 +649,15 @@ class GAMMA(object):
         gen_best_idx = np.argmax(fitness[:,0])
         return fitness, gen_best_idx
 
-    def evaluate(self, pool, population, cur_gen=-1):
+    def evaluate(self, pool, population, cur_gen=-1, precision=None):
         gen_best = -float("Inf")
         gen_best_activity = None
         gen_best_idx = 0
         count_non_valid = 0
         # populations = pool.map(self.thread_fun_correctify_tile_dependency, population)
         # population[:] = populations
-        reward_activ_list = pool.map(self.thread_fun, population)
+        partial_thread_fun = functools.partial(self.thread_fun, precision=precision)
+        reward_activ_list = pool.map(partial_thread_fun, population)
 
         for i in range(len(population)):
             reward, activity_count = reward_activ_list[i]
@@ -721,17 +731,17 @@ class GAMMA(object):
         return pop_inj, inj_fitness
 
     def run(self, dimension, stage_idx=0, prev_stage_value=0, num_population=100, num_generations=100, elite_ratio=0.05,
-                       parents_ratio=0.4, ratio_decay=1, num_finetune=1, best_sol_1st=None, init_pop=None, bias=None, uni_base=True, use_factor=False, use_pleteau=False, L1_bias_template=None):
+                       parents_ratio=0.4, ratio_decay=1, num_finetune=1, best_sol_1st=None, init_pop=None, bias=None, uni_base=True, use_factor=False, use_pleteau=False, L1_bias_template=None, precision=None):
         self.init_arguement(dimension=dimension, stage_idx=stage_idx, prev_stage_value=prev_stage_value, num_population=num_population, num_generations=num_generations, elite_ratio=elite_ratio,
                        parents_ratio=parents_ratio, ratio_decay=ratio_decay, num_finetune=num_finetune, best_sol_1st=best_sol_1st, init_pop=init_pop,uni_base=uni_base, use_factor=use_factor, use_pleteau=use_pleteau,L1_bias_template=L1_bias_template)
         pool = Pool(min(self.num_population + self.num_elite, cpu_count()))
-        population = self.reinit_pop(pool,self.num_population,  self.stage_idx, self.best_sol_1st, self.init_pop, bias=bias)
+        population = self.reinit_pop(pool,self.num_population,  self.stage_idx, self.best_sol_1st, self.init_pop, bias=bias, precision=precision)
         if self.map_cstr:
             self.cstr_list, self.num_free_order, self.num_free_par = self.map_cstr.get_cstr_list(copy.deepcopy(population[0]), fixed_sp_sz=self.fixedCluster)
         for g in range(num_generations):
 
             while self.num_parents < 1:  # restart
-                population = self.reinit_pop(pool, self.num_population, self.stage_idx, self.best_sol_1st, self.init_pop, cur_gen=g)
+                population = self.reinit_pop(pool, self.num_population, self.stage_idx, self.best_sol_1st, self.init_pop, cur_gen=g, precision=precision)
                 print("Reinitialize population")
 
             population, self.fitness, self.parents = self.select_parents(population, self.fitness, self.num_parents, self.num_population,)
@@ -769,12 +779,12 @@ class GAMMA(object):
             # population = elite + population + pop_inj
             self.fitness = np.concatenate((self.elite_fitness, self.fitness))
             # self.fitness = np.concatenate((self.elite_fitness, self.fitness, inj_fitness))
-            chkpt = self.evaluate(pool=pool, population=population, cur_gen=g)
+            chkpt = self.evaluate(pool=pool, population=population, cur_gen=g, precision=precision)
             # self.check_tile_dependency(population)
 
             if self.log_level>1:
                 if chkpt["best_sol"] is not None and self.log_level>1:
-                    best_runtime, best_throughput, best_energy, best_area, best_l1_size, best_l2_size, best_mac, best_power, best_num_pe = self.get_indiv_info( chkpt["best_sol"])
+                    best_runtime, best_throughput, best_energy, best_area, best_l1_size, best_l2_size, best_mac, best_power, best_num_pe = self.get_indiv_info( chkpt["best_sol"], precision=precision)
                     # best_num_pe = chkpt["best_sol"][0][1] if self.num_pe<1 else self.num_pe
                     # print(f"Runtime: {best_runtime}, L1: {best_l1_size}, L2: {best_l2_size}, L1_usage:{best_l1_size/self.l1_size:}, L2_usage:{best_l2_size/self.l2_size:.4f}, PE: {best_num_pe}")
                     print(f"Gen {g+1}: Reward: {chkpt['best_reward'][0]:.3e}, Runtime: {best_runtime}, Area: {best_area/1e6:.3f}mm2,  PE Area_ratio: {best_num_pe*MAC_AREA_INT8/best_area*100:.1f}%, L1: {best_l1_size}, L2: {best_l2_size},  PE: {best_num_pe}")
@@ -820,12 +830,12 @@ class GAMMA(object):
     def thread_fun_correctify_tile_dependency(self, indv):
         return self.correctify_tile_dependency_thread(indv)
 
-    def thread_fun(self, individual):
-        reward, activity_count = self.oberserve_maestro(individual)
+    def thread_fun(self, individual, precision=None):
+        reward, activity_count = self.oberserve_maestro(individual, precision=precision)
         return [reward, activity_count]
 
-    def get_indiv_info(self, individual, num_pe=None, l1_size=None, l2_size=None, NocBW=None):
-        self.oberserve_maestro(individual,num_pe=num_pe, l1_size=l1_size, l2_size=l2_size, NocBW=NocBW)
+    def get_indiv_info(self, individual, num_pe=None, l1_size=None, l2_size=None, NocBW=None, precision=None):
+        self.oberserve_maestro(individual,num_pe=num_pe, l1_size=l1_size, l2_size=l2_size, NocBW=NocBW, precision=precision)
         return self.observation
 
     def get_CONVtypeShape(self, dimensions, CONVtype=1):
@@ -842,7 +852,7 @@ class GAMMA(object):
             print("Not supported layer.")
         return dimensions
 
-    def write_maestro(self, indv, layer_id=0, m_file = None, folder_path = None):
+    def write_maestro(self, indv, layer_id=0, m_file = None, folder_path = None, precision=None):
         dimensions = [self.dimension]
         if layer_id != 0:
             m_file_with_layer = "{}_{}".format(m_file, layer_id)
@@ -861,6 +871,8 @@ class GAMMA(object):
                 fo.write(
                     "Dimensions {{ K: {:.0f}, C: {:.0f}, Y: {:.0f}, X: {:.0f}, R: {:.0f}, S: {:.0f} }}\n".format(
                         *dimension))
+                if precision is not None:
+                    fo.write("Precision: {{ {} }}\n".format(precision))
                 fo.write("Dataflow {\n")
                 for k in range(0, len(indv), 7):
                     for i in range(k, k + 7):
@@ -888,16 +900,16 @@ class GAMMA(object):
                 fo.write("}\n")
             fo.write("}")
 
-    def oberserve_maestro(self, indv, num_pe=None, l1_size=None, l2_size=None, NocBW=None, offchipBW=None):
+    def oberserve_maestro(self, indv, num_pe=None, l1_size=None, l2_size=None, NocBW=None, offchipBW=None, precision=None):
 
         m_file = "{}".format(random.randint(0, 2**32))
-        self.write_maestro(indv,m_file=m_file)
+        self.write_maestro(indv, m_file=m_file, precision=precision)
         if num_pe:
-            to_use_num_pe = num_pe
+            to_use_num_pe = self.num_pe_to_use(num_pe, precision)
         elif self.num_pe <1:
-            to_use_num_pe = indv[0][1]
+            to_use_num_pe = self.num_pe_to_use(indv[0][1], precision)
         else:
-            to_use_num_pe = self.num_pe
+            to_use_num_pe = self.num_pe_to_use(self.num_pe, precision)
         # print(num_pe, bw, l1_size)
         os.remove("./{}.csv".format(m_file)) if os.path.exists("./{}.csv".format(m_file)) else None
         command = [self._executable,
@@ -908,6 +920,8 @@ class GAMMA(object):
                    "--noc_mc_support=true", "--num_pes={}".format(int(to_use_num_pe)),
                    "--num_simd_lanes=1", "--l1_size_cstr={}".format(self.l1_size if not l1_size else l1_size),
                    "--l2_size_cstr={}".format(self.l2_size if not l2_size else l2_size), "--print_res=false", "--print_res_csv_file=true", "--print_log_file=false", "--print_design_space=false", "--msg_print_lv=0"]
+# "--num_simd_lanes=1", "--l1_size_cstr={}".format(int(self.l1_to_use(self.l1_size, precision)) if not l1_size else
+        # int(self.l1_to_use(l1_size, precision))),
 
         process = Popen(command, stdout=PIPE, stderr=PIPE)
         stdout, stderr = process.communicate()
@@ -960,7 +974,8 @@ class GAMMA(object):
             elif self.area_pebuf_only:
                 area = self.compute_area_maestro(to_use_num_pe, l1_size, l2_size)
 
-            self.observation = [np.mean(x) for x in [runtime, throughput, energy, area, l1_size, l2_size, mac, power, to_use_num_pe]]
+            self.observation = [np.mean(x) for x in [runtime, throughput, energy, area, l1_size, l2_size, mac, power,
+                                                     self.restore_num_pe(to_use_num_pe, precision)]]
             def catch_exception():
                 if l1_size>self.l1_size or l2_size>self.l2_size or any(runtime_series<1) or any(l1_size_series<1) or any(l2_size_series<1):
                     return True
@@ -977,6 +992,50 @@ class GAMMA(object):
         except:
             return None, None
 
+    def num_pe_to_use(self, num_pe, precision):
+
+        if precision is None or precision == "FP32":
+            return num_pe
+        if precision == "FP16":
+            return num_pe / 2
+        if precision == "FP8":
+            return num_pe / 4
+        if precision == "INT32":
+            return num_pe
+        if precision == "INT16":
+            return num_pe / 2
+        if precision == "INT8":
+            return num_pe / 4
+
+    def restore_num_pe(self, num_pe, precision):
+
+        if precision is None or precision == "FP32":
+            return num_pe
+        if precision == "FP16":
+            return num_pe * 2
+        if precision == "FP8":
+            return num_pe * 4
+        if precision == "INT32":
+            return num_pe
+        if precision == "INT16":
+            return num_pe * 2
+        if precision == "INT8":
+            return num_pe * 4
+
+    def l1_to_use(self, l1_size, precision):
+
+        if precision is None or precision == "FP32":
+            return l1_size
+        if precision == "FP16":
+            return l1_size * 2
+        if precision == "FP8":
+            return l1_size * 4
+        if precision == "INT32":
+            return l1_size
+        if precision == "INT16":
+            return l1_size * 2
+        if precision == "INT8":
+            return l1_size * 4
     def impose_halloffame(self, observe_value, target="latency_ave" ):
         is_violated = False
         if self.stat is not None:

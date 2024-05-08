@@ -17,8 +17,8 @@ if __name__ == "__main__":
     parser.add_argument('--model', type=str, default="resnet18", help='Model to run')
     parser.add_argument('--num_layer', type=int, default=0, help='Number of layers to optimize')
     parser.add_argument('--singlelayer', type=int, default=0, help='The layer index to optimize')
-    parser.add_argument('--slevel_min', type=int, default=2, help='Minimum number of parallelization level')
-    parser.add_argument('--slevel_max', type=int, default=2, help='Maximum number of parallelization level')
+    parser.add_argument('--slevel_min', type=int, default=3, help='Minimum number of parallelization level')
+    parser.add_argument('--slevel_max', type=int, default=3, help='Maximum number of parallelization level')
     parser.add_argument('--fixedCluster', type=int, default=0, help='Rigid cluster size')
     parser.add_argument('--log_level', type=int, default=1, help='Detail: 2, runtimeinfo: 1')
     parser.add_argument('--costmodel_cstr', type=str, default='maestro_cstr', help='Constraint from Cost model')
@@ -41,7 +41,17 @@ if __name__ == "__main__":
     m_file_path = "../../data/model/"
     m_file = os.path.join(m_file_path, opt.model + ".csv")
     df = pd.read_csv(m_file)
-    model_defs = df.to_numpy()
+    model = df.to_numpy()
+    model_defs = []
+    precision_array = []
+
+    for sublist in model:
+        string_indices = [i for i, elem in enumerate(sublist) if isinstance(elem, str)]
+        precision_array.extend(elem for elem in sublist if isinstance(elem, str))
+        sublist = np.delete(sublist, string_indices)
+        model_defs.append(sublist.tolist())
+    model_defs = np.array(model_defs)
+
     if opt.singlelayer:
         model_defs=model_defs[opt.singlelayer-1:opt.singlelayer]
     else:
@@ -63,30 +73,12 @@ if __name__ == "__main__":
     os.makedirs(outdir_exp, exist_ok=True)
     chkpt_file_t = "{}".format("result")
     chkpt_file = os.path.join(outdir_exp, chkpt_file_t + "_c.plt")
-    map_cstr = None
-    if opt.accel_cstr:
-        accel_file = importlib.import_module(f'data.mapping_cstr.advanced_cstr.accel_cstr.{opt.accel_cstr}')
-        accelator_cstr = accel_file.accel_cstr
-        map_cstr = Constraint(num_pe=opt.num_pe)
-        translate_to_actual_cstr(accelator_cstr, map_cstr)
-
-    if  opt.mapping_cstr:
-        mapping_file = importlib.import_module(f'data.mapping_cstr.{opt.mapping_cstr}')
-        mapping_cstr = mapping_file.mapping_cstr
-        map_cstr = Constraint(num_pe=opt.num_pe) if not map_cstr else map_cstr
-        put_into_actual_cstr(mapping_cstr, map_cstr)
-
-    if  opt.costmodel_cstr:
-        mapping_file = importlib.import_module(f'data.mapping_cstr.advanced_cstr.costmodel_cstr.{opt.costmodel_cstr}')
-        costmodel_cstr = mapping_file.mapping_cstr
-        map_cstr = Constraint(num_pe=opt.num_pe) if not map_cstr else map_cstr
-        put_into_actual_cstr(costmodel_cstr, map_cstr)
 
     if check_tpu(opt.accel_cstr, opt.mapping_cstr):
         model_defs = translate_to_gemm(model_defs)
 
     try:
-        train_model(model_defs, input_arg=opt, map_cstr=map_cstr, chkpt_file=chkpt_file)
+        train_model(model_defs, input_arg=opt, chkpt_file=chkpt_file, precisions=precision_array)
 
     finally:
         for f in glob.glob("*.m"):
