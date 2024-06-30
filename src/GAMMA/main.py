@@ -3,8 +3,8 @@ DEVELOP_MODE = False
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--fitness1', type=str, default="latency", choices=('latency', 'energy', 'power', 'EDP', 'area'), help='First objective')
-    parser.add_argument('--fitness2', type=str, default="energy", choices=('latency', 'energy', 'power', 'EDP', 'area'), help='Second objective')
-    parser.add_argument('--num_pop', type=int, default=20,help='Number of populations')
+    parser.add_argument('--fitness2', type=str, default="energy",choices=('latency', 'energy', 'power', 'EDP', 'area'), help='Second objective')
+    parser.add_argument('--num_pop', type=int, default=20 ,help='Number of populations')
     parser.add_argument('--parRS', default=False, action='store_true', help='Parallize across R S dimension')
     parser.add_argument('--epochs', type=int, default=2, help='Number of epochs (i.e., Numbers of generations)')
     parser.add_argument('--outdir', type=str, default="outdir", help='Output directiory')

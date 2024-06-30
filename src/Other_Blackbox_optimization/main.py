@@ -29,9 +29,9 @@ search_level = 1
 
 def get_reward(env, indv):
     if opt.fixedCluster>0:
-        reward = env.oberserve_maestro(indv, sp2_sz=opt.fixedCluster)
+        reward = env.observe_maestro(indv, sp2_sz=opt.fixedCluster)
     else:
-        reward = env.oberserve_maestro(indv)
+        reward = env.observe_maestro(indv)
     if reward is None:
         reward = [-2**63]
     reward = reward[0]

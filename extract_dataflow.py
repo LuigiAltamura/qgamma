@@ -1,52 +1,61 @@
 import os
 import argparse
 
-def extract_dataflow(file_name, output_folder):
+def extract_sections(file_name, output_folder, output_file_name=None):
     # Read the content of the original file
     with open(file_name, 'r') as f:
         content = f.read()
 
-    # Find the starting and ending indices of the Dataflow section
-    start_index = content.find("Dataflow {")
-    end_index = content.find("}", start_index) + 1
+    # Initialize sections
+    precision_section = ""
+    dataflow_section = ""
 
-    # Extract the Dataflow section
-    dataflow_section = content[start_index:end_index]
+    # Find the Precision section, if it exists
+    precision_start_index = content.find("Precision:")
+    if precision_start_index != -1:
+        precision_end_index = content.find("}", precision_start_index) + 1
+        precision_section = content[precision_start_index:precision_end_index]
+        precision_section += '\n'
 
-    # Add a new line after the closing parenthesis
-    dataflow_section += '\n'
+    # Find the Dataflow section
+    dataflow_start_index = content.find("Dataflow {")
+    if dataflow_start_index != -1:
+        dataflow_end_index = content.find("}", dataflow_start_index) + 1
+        dataflow_section = content[dataflow_start_index:dataflow_end_index]
+        dataflow_section += '\n'
 
-    # Add a tab of shift to each line inside the Dataflow section, excluding the first and last lines
-    lines = dataflow_section.split('\n')
-    indented_lines = '\n'.join(lines[0:1] + ['\t' + line for line in lines[1:-2]] + lines[-2:])
+        # Indent lines in Dataflow section (excluding the first and last lines)
+        dataflow_lines = dataflow_section.split('\n')
+        indented_dataflow_lines = '\n'.join(dataflow_lines[0:1] + ['\t' + line for line in dataflow_lines[1:-1]] + dataflow_lines[-1:])
+        dataflow_section = indented_dataflow_lines
 
     # Create the output folder if it doesn't exist
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
 
-    # Construct the output file path without the "_dataflow" suffix
-    output_file_name = os.path.splitext(os.path.basename(file_name))[0].replace('_dataflow', '')
-    output_file_path = os.path.join(output_folder, output_file_name + '.m')
+    # Determine the output file name
+    if output_file_name is None:
+        output_file_name = os.path.basename(file_name)
+    output_file_path = os.path.join(output_folder, output_file_name)
 
-    # Write the modified Dataflow content to the new file
+    # Write the modified Precision and Dataflow sections to the new file
     with open(output_file_path, 'w') as f:
-        # Write the modified Dataflow section
-        f.write(indented_lines)
+        if precision_section:
+            f.write(precision_section)
+        if dataflow_section:
+            f.write(dataflow_section)
 
 if __name__ == "__main__":
     # Create an argument parser
-    parser = argparse.ArgumentParser(description='Extract Dataflow from a file and save to a new file.')
+    parser = argparse.ArgumentParser(description='Extract Precision and Dataflow from a file and save to a new file.')
 
     # Add the file and output folder arguments
-    parser.add_argument('--file', type=str, help='Path of the input file')
-    parser.add_argument('--out', type=str, help='Path of the output folder')
+    parser.add_argument('--file', type=str, required=True, help='Path of the input file')
+    parser.add_argument('--out', type=str, required=True, help='Path of the output folder')
+    parser.add_argument('--outname', type=str, help='Optional name of the output file')
 
     # Parse the command-line arguments
     args = parser.parse_args()
 
-    # Check if both --file and --out arguments are provided
-    if args.file and args.out:
-        # Extract the Dataflow part and save it to the output folder
-        extract_dataflow(args.file, args.out)
-    else:
-        print("Both --file and --out arguments are required.")
+    # Extract the Precision and Dataflow parts and save them to the output folder
+    extract_sections(args.file, args.out, args.outname)
