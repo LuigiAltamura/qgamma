@@ -164,14 +164,6 @@ class GAMMA(object):
             R = last_cluster_dict["R"]
             S = last_cluster_dict["S"]
 
-        cluster_list = [
-            ['K', K],
-            ['C', C],
-            ['Y', Y],
-            ['X', X],
-            ['R', R],
-            ['S', S]
-        ]
 
         if self.slevel_max == 3:
             if uni_base:
@@ -181,13 +173,13 @@ class GAMMA(object):
             else:
                 if ind_level == 0:
                     sp_sz = random.randint(1, self.num_pe if self.num_pe > 0 else self.pe_limit)
-                    sp = np.random.choice(self.get_top_n_dimensions(cluster_list, self.cluster_space, 3))
+                    sp = np.random.choice(self.cluster_space)
                 if ind_level == 1:
-                    sp = np.random.choice(self.get_top_n_dimensions(cluster_list, self.cluster_space, 2))
+                    sp = np.random.choice(self.cluster_space)
                     if self.fixedCluster > 0:
                         sp_sz = self.fixedCluster
                     else:
-                        sp_sz = self.rand_choice_power_of_2(self.num_pe // self.sp_sz_precision_based_3_level())
+                        sp_sz = random.randint(1, self.num_pe // self.sp_sz_precision_based_3_level())
         else:
             #case INT32/FP32
             sp = random.choice(self.cluster_space)
@@ -197,14 +189,12 @@ class GAMMA(object):
                     sp_sz = self.fixedCluster
                 else:
                     if self.num_pe > 0:
-                        sp_sz = self.rand_choice_power_of_2(self.num_pe)
-                        #sp_sz = random.randint(1, min(lastcluster_sz, self.num_pe))
+                        sp_sz = random.randint(1, min(lastcluster_sz, self.num_pe))
                     else:
-                        #sp_sz = random.randint(1, lastcluster_sz)
-                        sp_sz = self.rand_choice_power_of_2(lastcluster_sz)
+                        sp_sz = random.randint(1, lastcluster_sz)
+
             else:
-                sp_sz = self.rand_choice_power_of_2(self.num_pe if self.num_pe > 0 else self.pe_limit)
-                #sp_sz = random.randint(1, self.num_pe if self.num_pe > 0 else self.pe_limit)
+                sp_sz = random.randint(1, self.num_pe if self.num_pe > 0 else self.pe_limit)
         # use factor not used in this version
         if self.use_factor and not uni_base:
             df = [["K", np.random.choice(self.dimension_factors["K"]["array"])],
@@ -218,8 +208,8 @@ class GAMMA(object):
                 df = [["K", K], ["C", C], ["Y", self.dimension_dict['R']], ["X", self.dimension_dict['S']], ["R", R],
                       ["S", S]]
             else:
-                K = self.rand_choice_power_of_2(K)
-                C = self.rand_choice_power_of_2(C)
+                K = random.randint(1, K)
+                C = random.randint(1, C)
                 R = random.randint(1, R)
                 S = random.randint(1, S)
                 X = random.randint(self.dimension_dict['S'], X)
@@ -453,21 +443,21 @@ class GAMMA(object):
                         if self.slevel_max == 3:
                             if pick // 7 == 1:
                                 if self.fixedCluster < 1:
-                                    sp_sz = self.rand_choice_power_of_2(
+                                    sp_sz = random.randint(1,
                                         self.num_pe // self.sp_sz_precision_based_3_level())
-                                    sp = np.random.choice(self.get_top_n_dimensions(indv[8:14], choices, 2))
+                                    sp = np.random.choice(choices)
                                 else:
                                     sp_sz = self.fixedCluster
-                                    sp = np.random.choice(self.get_top_n_dimensions(indv[8:14], choices, 2))
+                                    sp = np.random.choice(choices)
                             if pick // 7 == 2:
                                 sp_sz = self.sp_sz_precision_based_3_level()
-                                sp = np.random.choice(self.get_top_n_dimensions(indv[15:21], choices[1:4], 2))
+                                sp = np.random.choice(choices[1:4])
                             if pick // 7 == 0:
                                 sp_sz = random.randint(1, self.num_pe)
-                                sp = np.random.choice(self.get_top_n_dimensions(indv[1:7], choices, 3))
+                                sp = np.random.choice(choices)
                         else:
                             if pick > 0:
-                                sp = np.random.choice(self.get_top_n_dimensions(indv[8:14], choices, 2))
+                                sp = np.random.choice(choices)
                                 if self.map_cstr and "sp_sz" in self.cstr_list[pick // 7]:
                                     sp_sz = self.cstr_list[pick // 7]["sp_sz"]
                                 else:
@@ -476,8 +466,7 @@ class GAMMA(object):
                                         lastcluster_sz = last_cluster_dict[sp] if last_cluster_dict else \
                                             self.dimension_dict[sp]
                                         if self.num_pe > 0:
-                                            # sp_sz = max(1, random.randint(0, min(lastcluster_sz, self.num_pe)))
-                                            sp_sz = self.rand_choice_power_of_2(self.num_pe)
+                                            sp_sz = max(1, random.randint(0, min(lastcluster_sz, self.num_pe)))
                                         else:
                                             # sp_sz = max(1, random.randint(0, min(lastcluster_sz, indv[0][1])))
                                             sp_sz = max(1, random.choice(
@@ -486,7 +475,7 @@ class GAMMA(object):
                                         sp_sz = self.fixedCluster
 
                             else:
-                                sp = np.random.choice(self.get_top_n_dimensions(indv[1:7], choices, 3))
+                                sp = np.random.choice(choices)
                                 sp_sz = pop[idx][pick][1]
 
                         pop[idx][pick] = [sp, sp_sz]
