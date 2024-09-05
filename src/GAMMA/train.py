@@ -39,23 +39,7 @@ bias = {"par": {1: "K", 2: "C"}, "order": {1: ["K", "C", "Y", "X"], 2: ["K", "C"
 # bias = {"par": {1: "Y"}}
 
 
-def get_pe_usage(env, sol, num_pe):
-    util_num_pe = num_pe
-    baseline = env.get_indiv_info(sol, num_pe=num_pe)
-    best_runtime, best_throughput, best_energy, best_area, best_l1_size, best_l2_size, best_mac, best_power, best_num_pe = baseline
-    baseline = np.array(baseline)[:-2]
-    for i in range(num_pe - 1):
-        util_num_pe -= 1
-        cur = env.get_indiv_info(sol, num_pe=util_num_pe)
-        best_runtime, best_throughput, best_energy, best_area, best_l1_size, best_l2_size, best_mac, best_power, best_num_pe = cur
-        cur = np.array(cur)[:-2]
-        if sum(baseline != cur) > 1:
-            util_num_pe += 1
-            break
-    return util_num_pe
-
-
-def train_model(model_defs, input_arg, chkpt_file='./chkpt', precisions=None):
+def train_model(model_defs, input_arg, chkpt_file='./chkpt', precisions=None, stride=None):
     global opt
     opt = input_arg
     fitness = [opt.fitness1, opt.fitness2]
@@ -78,9 +62,11 @@ def train_model(model_defs, input_arg, chkpt_file='./chkpt', precisions=None):
         else:
             precision = None
 
+        layer_stride = stride[num_layer-1]
+
         map_cstr = map_constraints(map_cstr, opt, precision)
 
-        env.reset_dimension(fitness=fitness, constraints=constraints, dimension=dimension)
+        env.reset_dimension(fitness=fitness, constraints=constraints, dimension=dimension, stride=layer_stride)
         env.reset_hw_parm(num_pe=get_value_for_pe(precision, opt.num_pe),
                           l1_size=opt.l1_size,
                           l2_size=opt.l2_size, pe_limit=opt.pe_limit,

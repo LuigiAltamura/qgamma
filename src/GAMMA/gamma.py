@@ -37,8 +37,10 @@ class GAMMA(object):
             # maestro = path + "maestro21_noRScstr"
             maestro = path + "maestro22_noRScstr"
         else:
-            maestro = "../../cost_model/maestro"
+            maestro = "../../cost_model/qmaestro"
+        accelerator = "../../cost_model/accelerator_gamma.m"
 
+        self.accelerator = "{}".format(accelerator)
         self._executable = "{}".format(maestro)
         self.out_repr = set(["K", "C", "R", "S"])
         self.num_pe = num_pe
@@ -69,6 +71,7 @@ class GAMMA(object):
         self.area_pebuf_only = False
         self.external_area_model = False
         self.precision = None
+        self.stride = None
 
     def reset_hw_parm(self, l1_size=None, l2_size=None, num_pe=None, NocBW=None, map_cstr=None, pe_limit=None,
                       area_pebuf_only=None, external_area_model=None, offchipBW=None, slevel_max=None, slevel_min=None,
@@ -109,7 +112,7 @@ class GAMMA(object):
         return dimension_factors
 
     def reset_dimension(self, dimension=None, fitness=None, constraints=None, constraint_class=None,
-                        external_mem_cstr=None):
+                        external_mem_cstr=None, stride=None):
         if dimension is not None:
             self.dimension = dimension
         if fitness is not None:
@@ -120,6 +123,8 @@ class GAMMA(object):
             self.constraint_class = constraint_class
         if external_mem_cstr is not None:
             self.external_mem_cstr = external_mem_cstr
+        if stride.all():
+            self.stride = stride
         self.use_ranking = True if self.fitness_objective[0] == "ranking" else False
         self.dimension_dict = {"K": self.dimension[0], "C": self.dimension[1], "Y": self.dimension[2],
                                "X": self.dimension[3], "R": self.dimension[4], "S": self.dimension[5],
@@ -158,8 +163,16 @@ class GAMMA(object):
             X = last_cluster_dict["X"]
             R = last_cluster_dict["R"]
             S = last_cluster_dict["S"]
-        sp = random.choice(self.cluster_space)
-        lastcluster_sz = last_cluster_dict[sp] if last_cluster_dict else self.dimension_dict[sp]
+
+        cluster_list = [
+            ['K', K],
+            ['C', C],
+            ['Y', Y],
+            ['X', X],
+            ['R', R],
+            ['S', S]
+        ]
+
         if self.slevel_max == 3:
             if uni_base:
                 sp_sz = self.sp_sz_precision_based_3_level()
@@ -168,22 +181,31 @@ class GAMMA(object):
             else:
                 if ind_level == 0:
                     sp_sz = random.randint(1, self.num_pe if self.num_pe > 0 else self.pe_limit)
+                    sp = np.random.choice(self.get_top_n_dimensions(cluster_list, self.cluster_space, 3))
                 if ind_level == 1:
+                    sp = np.random.choice(self.get_top_n_dimensions(cluster_list, self.cluster_space, 2))
                     if self.fixedCluster > 0:
                         sp_sz = self.fixedCluster
                     else:
-                        sp_sz = np.random.randint(2, self.num_pe // self.sp_sz_precision_based_3_level())
+                        sp_sz = self.rand_choice_power_of_2(self.num_pe // self.sp_sz_precision_based_3_level())
         else:
+            #case INT32/FP32
+            sp = random.choice(self.cluster_space)
+            lastcluster_sz = last_cluster_dict[sp] if last_cluster_dict else self.dimension_dict[sp]
             if uni_base == True:
                 if self.fixedCluster > 0:
                     sp_sz = self.fixedCluster
                 else:
                     if self.num_pe > 0:
-                        sp_sz = random.randint(1, min(lastcluster_sz, self.num_pe))
+                        sp_sz = self.rand_choice_power_of_2(self.num_pe)
+                        #sp_sz = random.randint(1, min(lastcluster_sz, self.num_pe))
                     else:
-                        sp_sz = random.randint(1, lastcluster_sz)
+                        #sp_sz = random.randint(1, lastcluster_sz)
+                        sp_sz = self.rand_choice_power_of_2(lastcluster_sz)
             else:
-                sp_sz = random.randint(1, self.num_pe if self.num_pe > 0 else self.pe_limit)
+                sp_sz = self.rand_choice_power_of_2(self.num_pe if self.num_pe > 0 else self.pe_limit)
+                #sp_sz = random.randint(1, self.num_pe if self.num_pe > 0 else self.pe_limit)
+        # use factor not used in this version
         if self.use_factor and not uni_base:
             df = [["K", np.random.choice(self.dimension_factors["K"]["array"])],
                   ["C", np.random.choice(self.dimension_factors["C"]["array"])],
@@ -193,13 +215,43 @@ class GAMMA(object):
                   ["S", np.random.choice(self.dimension_factors["S"]["array"])]]
         else:
             if uni_base:
-                df = [["K", K], ["C", C], ["Y", Y], ["X", X], ["R", R], ["S", S]]
+                df = [["K", K], ["C", C], ["Y", self.dimension_dict['R']], ["X", self.dimension_dict['S']], ["R", R],
+                      ["S", S]]
             else:
-                df = [["K", random.randint(1, K)], ["C", random.randint(1, C)], ["Y", random.randint(1, Y)],
-                      ["X", random.randint(1, X)], ["R", random.randint(1, R)], ["S", random.randint(1, S)]]
+                K = self.rand_choice_power_of_2(K)
+                C = self.rand_choice_power_of_2(C)
+                R = random.randint(1, R)
+                S = random.randint(1, S)
+                X = random.randint(self.dimension_dict['S'], X)
+                Y = random.randint(self.dimension_dict['R'], Y)
+
+                df = [["K", K], ["C", C], ["Y", Y], ["X", X], ["R", R], ["S", S]]
         idx = np.random.permutation(len(df))
         indv = [[sp, sp_sz]] + [df[i] for i in idx]
         return indv
+
+    def get_top_n_dimensions(self, cluster_list, allowed_vars, top_dim_num):
+        # Filter the dictionary to include only allowed variables
+        filtered_list = [item for item in cluster_list if item[0] in allowed_vars]
+
+        # Sort the list by the values in descending order and get the top n keys
+        top_n_keys = sorted(filtered_list, key=lambda x: x[1], reverse=True)[:top_dim_num]
+
+        # Return only the variable names (keys)
+        return [item[0] for item in top_n_keys]
+
+    def rand_choice_power_of_2(self, upper_limit, lower_limit=None):
+        # Determine the starting power based on the lower limit, if provided
+        start_power = 1 if lower_limit is None else max(1, int(np.ceil(np.log2(lower_limit))))
+
+        # Determine the ending power based on the upper limit
+        end_power = int(np.log2(upper_limit))
+
+        # Generate all powers of 2 from lower_limit (if specified) to upper_limit
+        powers_of_2 = [2 ** i for i in range(start_power, end_power + 1)]
+
+        # Return a random power of 2 from the list
+        return np.random.choice(powers_of_2) if powers_of_2 else None
 
     def sp_sz_precision_based_3_level(self):
 
@@ -398,20 +450,24 @@ class GAMMA(object):
                             choices = self.cstr_list[pick // 7]["sp"]
                         else:
                             choices = self.cluster_space
-                        if self.slevel_max == 3 and pick >= 7:
+                        if self.slevel_max == 3:
                             if pick // 7 == 1:
                                 if self.fixedCluster < 1:
-                                    sp_sz = np.random.randint(2, self.num_pe // self.sp_sz_precision_based_3_level())
-                                    sp = random.choice(choices)
+                                    sp_sz = self.rand_choice_power_of_2(
+                                        self.num_pe // self.sp_sz_precision_based_3_level())
+                                    sp = np.random.choice(self.get_top_n_dimensions(indv[8:14], choices, 2))
                                 else:
                                     sp_sz = self.fixedCluster
-                                    sp = random.choice(choices)
+                                    sp = np.random.choice(self.get_top_n_dimensions(indv[8:14], choices, 2))
                             if pick // 7 == 2:
                                 sp_sz = self.sp_sz_precision_based_3_level()
-                                sp = random.choice(choices[1:4])
+                                sp = np.random.choice(self.get_top_n_dimensions(indv[15:21], choices[1:4], 2))
+                            if pick // 7 == 0:
+                                sp_sz = random.randint(1, self.num_pe)
+                                sp = np.random.choice(self.get_top_n_dimensions(indv[1:7], choices, 3))
                         else:
-                            sp = random.choice(choices)
                             if pick > 0:
+                                sp = np.random.choice(self.get_top_n_dimensions(indv[8:14], choices, 2))
                                 if self.map_cstr and "sp_sz" in self.cstr_list[pick // 7]:
                                     sp_sz = self.cstr_list[pick // 7]["sp_sz"]
                                 else:
@@ -421,36 +477,68 @@ class GAMMA(object):
                                             self.dimension_dict[sp]
                                         if self.num_pe > 0:
                                             # sp_sz = max(1, random.randint(0, min(lastcluster_sz, self.num_pe)))
-                                            sp_sz = max(1, random.choice(
-                                                list(self.get_factors(min(lastcluster_sz, self.num_pe)))))
+                                            sp_sz = self.rand_choice_power_of_2(self.num_pe)
                                         else:
                                             # sp_sz = max(1, random.randint(0, min(lastcluster_sz, indv[0][1])))
                                             sp_sz = max(1, random.choice(
                                                 list(self.get_factors(min(lastcluster_sz, indv[0][1])))))
                                     else:
                                         sp_sz = self.fixedCluster
+
                             else:
+                                sp = np.random.choice(self.get_top_n_dimensions(indv[1:7], choices, 3))
                                 sp_sz = pop[idx][pick][1]
 
                         pop[idx][pick] = [sp, sp_sz]
                     else:
                         d, d_sz = indv[pick]
                         if pick > 7:
-                            if 7 <= pick < 14:
+                            if 7 < pick < 14:
+                                last_cluster_dict = self.scan_indv(indv[0:7])
+                            elif pick > 14:
                                 last_cluster_dict = self.scan_indv(indv[7:14])
-                            elif pick >= 14:
-                                last_cluster_dict = self.scan_indv(indv[:-7])
                             thr = last_cluster_dict[d]
+                            dim_sz_limitation = None
+                            if d == 'X':
+                                dim_sz_limitation = self.dimension_dict['S']
+                            if d == 'Y':
+                                dim_sz_limitation = self.dimension_dict['R']
+
+                            # this version does not work with use_factor
                             if self.use_factor is False:
-                                new_d_sz = random.randint(1, thr)
+                                if dim_sz_limitation is None:
+                                    new_d_sz = random.randint(1, thr)
+                                else:
+                                    if d == 'X' or d == 'Y':
+                                        if thr <= dim_sz_limitation:
+                                            new_d_sz = dim_sz_limitation
+                                        else:
+                                            new_d_sz = random.randint(dim_sz_limitation, thr)
+                                    if d == 'S' or d == 'R':
+                                        new_d_sz = self.dimension_dict['R'] if d == 'R' else self.dimension_dict['S']
                             else:
                                 choices = self.get_factors(thr)
                                 new_d_sz = np.random.choice(list(choices))
-
                         else:
+                            # this version does not work with use_factor
                             if self.use_factor is False:
+                                cluster_dict = self.scan_indv(indv[8:14])
+                                dim_sz_limitation = None
+                                if d == 'X':
+                                    dim_sz_limitation = self.dimension_dict['S']
+                                if d == 'Y':
+                                    dim_sz_limitation = self.dimension_dict['R']
                                 thr = self.dimension_dict[d]
-                                new_d_sz = random.randint(1, thr)
+
+                                lower_bound = cluster_dict[d]
+                                if dim_sz_limitation is None:
+                                    new_d_sz = random.randint(lower_bound, thr)
+                                else:
+                                    # redundant check on minimum size allowed for X and Y
+                                    if lower_bound < dim_sz_limitation:
+                                        new_d_sz = random.randint(dim_sz_limitation, thr)
+                                    else:
+                                        new_d_sz = random.randint(lower_bound, thr)
                             else:
                                 new_d_sz = np.random.choice(self.dimension_factors[d]["array"])
                         if is_finetune:
@@ -459,7 +547,6 @@ class GAMMA(object):
                             new_d_sz = d_sz + sampling
                             new_d_sz = max(1, min(new_d_sz, self.dimension_dict[d]))
                         pop[idx][pick][1] = new_d_sz
-
 
     def mutate_pe(self, pop, alpha=0.5, mutate_range_ratio=0.5):
         for idx in range(len(pop)):
@@ -525,6 +612,8 @@ class GAMMA(object):
                 length = min(len(dad), len(mom))
                 if random.random() < alpha:
                     cross_point = random.choice(["K", "C", "Y", "X", "R", "S"])
+                    mom_size_limitation = None
+                    dad_size_limitation = None
                     for k in range(0, length, 7):
                         for i in range(k + 1, k + 7):
                             d, d_sz = dad[i]
@@ -537,18 +626,10 @@ class GAMMA(object):
                                 mom_idx = i
                         dad[dad_idx][1] = mom_sz
                         mom[mom_idx][1] = dad_sz
+
                 pop[idx] = dad
                 if idx + 1 < len(pop):
                     pop[idx + 1] = mom
-
-    def check_tile_dependency(self, pop):
-        for idx in range(0, len(pop)):
-            cur_pop = pop[idx]
-            last_cluster = self.scan_indv(cur_pop)
-            first_cluster = self.scan_indv(cur_pop[:7])
-            for key in ["K", "C", "Y", "X", "R", "S"]:
-                if last_cluster[key] > first_cluster[key]:
-                    print("Error", cur_pop)
 
     def correctify_tile_dependency(self, pop):
         for i in range(0, len(pop)):
@@ -556,7 +637,7 @@ class GAMMA(object):
             cur_cluster = None
             levels = len(ind) // 7
             for i in range(levels):
-                last_cluster = copy.deepcopy(cur_cluster)
+                last_cluster = cur_cluster
                 cur_cluster = self.scan_indv(ind[7 * i:7 * (i + 1)])
                 if i == 0:
                     continue
@@ -564,23 +645,10 @@ class GAMMA(object):
                     for idx in range(7 * i + 1, 7 * (i + 1)):
                         d, d_sz = ind[idx]
                         d_sz = min(last_cluster[d], d_sz)
+                        if (d_sz > last_cluster[d]):
+                            prova = "male"
                         ind[idx][1] = d_sz
-
-    def correctify_tile_dependency_thread(self, indv):
-        ind = copy.deepcopy(indv)
-        cur_cluster = None
-        levels = len(ind) // 7
-        for i in range(levels):
-            last_cluster = copy.deepcopy(cur_cluster)
-            cur_cluster = self.scan_indv(ind[7 * i:7 * (i + 1)])
-            if i == 0:
-                continue
-            else:
-                for idx in range(7 * i + 1, 7 * (i + 1)):
-                    d, d_sz = ind[idx]
-                    d_sz = min(last_cluster[d], d_sz)
-                    ind[idx][1] = d_sz
-        return ind
+                        cur_cluster = self.scan_indv(ind[7 * i:7 * (i + 1)])
 
     def born_cluster_ind(self, ind):
         ind_level = len(ind) // 7
@@ -599,7 +667,6 @@ class GAMMA(object):
 
             ind = new_ind
         return ind
-
 
     def born_cluster(self, pop, alpha=0.1):
         max_count = len(pop)
@@ -653,9 +720,11 @@ class GAMMA(object):
                    precision=None):
         population = [self.create_genome_fixedSL(bias=bias) for _ in range(num_population)]
         # ====always create a base unit pop=======
-        self.create_unit_base_pops(population, num_all_unit=num_all_unit)
+        #self.create_unit_base_pops(population, num_all_unit=num_all_unit)
 
         # ========================================
+
+        self.correctify_tile_dependency(population)
         if init_pop is not None:
             # population = [self.create_genome_fixedSL() for _ in range(num_population)] if best_sol_1st is None else [best_sol_1st for _ in range(num_population)]
             population[:10] = init_pop[:10]
@@ -840,12 +909,7 @@ class GAMMA(object):
         best_sol = None
         no_change_counter = 0
 
-        if self.precision is None or self.precision == "FP32"or self.precision == "INT32":
-            num_gen = int(num_generations / 10)
-        else:
-            num_gen = int(num_generations)
-
-        for g in range(num_gen):
+        for g in range(num_generations):
 
             while self.num_parents < 1:  # restart
                 population = self.reinit_pop(pool, self.num_population, self.stage_idx, self.best_sol_1st,
@@ -879,9 +943,10 @@ class GAMMA(object):
                 self.kill_cluster(population, alpha=0.27)
 
             # pop_inj, inj_fitness = self.injection()
-            self.correctify_tile_dependency(population)
+
             # self.calculate_equivalent_num_pe(population)
             self.comform_to_cstr(population)
+            self.correctify_tile_dependency(population)
             population = elite + population
             # population = elite + population + pop_inj
             self.fitness = np.concatenate((self.elite_fitness, self.fitness))
@@ -907,8 +972,8 @@ class GAMMA(object):
                 best_sol = chkpt["best_sol"]
                 no_change_counter = 0
 
-            if no_change_counter > 100:
-                print(f"No improvement for 100 generations. Terminating at generation {g}.")
+            if no_change_counter > 150:
+                print(f"No improvement for 150 generations. Terminating at generation {g}.")
                 break
 
         population = self.sort_population(population)
@@ -945,9 +1010,6 @@ class GAMMA(object):
         population, self.fitness, self.parents = self.select_parents(population, self.fitness, self.num_parents,
                                                                      self.num_population, )
         return population
-
-    def thread_fun_correctify_tile_dependency(self, indv):
-        return self.correctify_tile_dependency_thread(indv)
 
     def thread_fun(self, individual, precision=None):
         reward, activity_count = self.observe_maestro(individual, precision=precision)
@@ -988,9 +1050,10 @@ class GAMMA(object):
                 dimension = self.get_CONVtypeShape(dimension, int(dimension[-1]))
                 fo.write("Layer {} {{\n".format(m_type))
                 fo.write("Type: {}\n".format(m_type))
+                fo.write("Stride {{ X: {}, Y: {} }}\n".format(*self.stride))
                 fo.write(
-                    "Dimensions {{ K: {:.0f}, C: {:.0f}, Y: {:.0f}, X: {:.0f}, R: {:.0f}, S: {:.0f} }}\n".format(
-                        *dimension))
+                    "Dimensions {{ K: {:.0f}, C: {:.0f}, R: {:.0f}, S: {:.0f}, Y: {:.0f}, X: {:.0f} }}\n".format(
+                        dimension[0], dimension[1], dimension[4], dimension[5], dimension[2], dimension[3]))
                 if precision is not None:
                     fo.write("Precision: {{ {} }}\n".format(precision))
                 fo.write("Dataflow {\n")
@@ -1002,19 +1065,21 @@ class GAMMA(object):
                             d, d_sz, _ = indv[i]
                         if i % 7 == 0:
                             if k != 0:
-                                fo.write("Cluster({},P);\n".format(d_sz))
+                                fo.write("\tCluster({},P);\n".format(d_sz))
                         else:
-                            sp = "SpatialMap" if d == indv[k][0] or (
-                                    len(indv[k]) > 2 and d == indv[k][2]) else "TemporalMap"
+                            sp = "\tSpatialMap" if d == indv[k][0] or (
+                                    len(indv[k]) > 2 and d == indv[k][2]) else "\tTemporalMap"
                             # MAESTRO cannot take K dimension as dataflow file
                             if not (m_type == "DSCONV"):
-                                fo.write("{}({},{}) {};\n".format(sp, d_sz, d_sz, self.get_out_repr(d)))
+                                #fo.write("{}({},{}) {};\n".format(sp, d_sz, d_sz, self.get_out_repr(d)))
+                                fo.write("{}({},{}) {};\n".format(sp, d_sz, d_sz, d))
                             else:
                                 if self.get_out_repr(d) == "C" and self.get_out_repr(indv[k][0]) == "K":
-                                    fo.write("{}({},{}) {};\n".format("SpatialMap", d_sz, d_sz, "C"))
+                                    fo.write("\t{}({},{}) {};\n".format("SpatialMap", d_sz, d_sz, "C"))
                                 else:
                                     if not (self.get_out_repr(d) == "K"):
-                                        fo.write("{}({},{}) {};\n".format(sp, d_sz, d_sz, self.get_out_repr(d)))
+                                        #fo.write("{}({},{}) {};\n".format(sp, d_sz, d_sz, self.get_out_repr(d)))
+                                        fo.write("\t{}({},{}) {};\n".format(sp, d_sz, d_sz, d))
 
                 fo.write("}\n")
                 fo.write("}\n")
@@ -1033,16 +1098,13 @@ class GAMMA(object):
             to_use_num_pe = self.num_pe_to_use(self.num_pe, precision)
         # print(num_pe, bw, l1_size)
         os.remove("./{}.csv".format(m_file)) if os.path.exists("./{}.csv".format(m_file)) else None
-        command = [self._executable,
-                   "--Mapping_file={}.m".format(m_file),
-                   "--full_buffer=false", "--noc_bw_cstr={}".format(self.NocBW if not NocBW else NocBW),
-                   "--noc_hops=1", "--noc_hop_latency=1",
-                   "--offchip_bw_cstr={}".format(self.offchipBW if not offchipBW else offchipBW),
-                   "--noc_mc_support=true", "--num_pes={}".format(int(to_use_num_pe)),
-                   "--num_simd_lanes=1", "--l1_size_cstr={}".format(self.l1_size if not l1_size else l1_size),
-                   "--l2_size_cstr={}".format(self.l2_size if not l2_size else l2_size), "--print_res=false",
-                   "--print_res_csv_file=true", "--print_log_file=false", "--print_design_space=false",
-                   "--msg_print_lv=0"]
+        command = [
+            self._executable,
+            "--Mapping_file={}.m".format(m_file),
+            "--HW_file={}".format(self.accelerator),
+            "--print_res=false",
+            "--print_res_csv_file=true",
+            "--print_log_file=false"]
         # "--num_simd_lanes=1", "--l1_size_cstr={}".format(int(self.l1_to_use(self.l1_size, precision)) if not l1_size else
         # int(self.l1_to_use(l1_size, precision))),
 
@@ -1105,7 +1167,7 @@ class GAMMA(object):
 
             self.observation = [np.mean(x) for x in [runtime, throughput, energy, area, l1_size, l2_size, mac, power,
                                                      self.restore_num_pe(to_use_num_pe, precision), l1_read, l1_write,
-                                                     l2_read,l2_write, avg_pe_utilized, avg_bw]]
+                                                     l2_read, l2_write, avg_pe_utilized, avg_bw]]
 
             def catch_exception():
                 if l1_size > self.l1_size or l2_size > self.l2_size or any(runtime_series < 1) or any(
@@ -1214,7 +1276,7 @@ class GAMMA(object):
 
     def judge(self):
         (runtime, throughput, energy, area, l1_size, l2_size, mac, power, num_pe, _, _, _, _,
-         _, _) = self.observation
+         avg_pe_utilized, _) = self.observation
 
         def get_objective(objective):
             values = []
@@ -1260,6 +1322,8 @@ class GAMMA(object):
                 if term in self.constraints:
                     if reward < -self.constraints[term]:
                         return [float("-Inf")] * len(self.fitness_objective)
+                if throughput > avg_pe_utilized:
+                    return [float("-Inf")] * len(self.fitness_objective)
                 values.append(reward)
             return values
 
@@ -1282,7 +1346,7 @@ class GAMMA(object):
         if self.precision is None or self.precision == "FP32" or self.precision == "INT32":
             self.num_population = num_population
         else:
-            self.num_population = num_population*2
+            self.num_population = num_population * 2
         self.prev_stage_value = prev_stage_value
         self.ratio_decay = ratio_decay
         self.best_sol_1st = best_sol_1st

@@ -1,10 +1,10 @@
 import os, sys
 commit_id = 'e1d8efd8e5469cf865a9db60007a70e3f0cb8778'
-dst_path = "cost_model/maestro"
+dst_path = "cost_model/qmaestro"
 maestro_dir = "../qmaestro"
 working_path = os.getcwd()
 dst_path = os.path.join(working_path, dst_path)
-maestro = os.path.join(maestro_dir, "maestro")
+maestro = os.path.join(maestro_dir, "qmaestro")
 maestro =  os.path.abspath(maestro)
 if os.path.exists(maestro_dir) is False:
     os.system("git clone https://github.com/maestro-project/maestro.git {}".format(maestro_dir))

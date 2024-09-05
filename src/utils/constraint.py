@@ -64,28 +64,6 @@ class Constraint():
         ret_num_free_order, ret_num_free_par = self.create_from_constraint(indv, fixed_sp_sz, self.dimension_dict)
         return self.reverse_cstr_list(self.cstr_list), ret_num_free_order, ret_num_free_par
 
-    def set_valid_value(self, lever_cstr, index_offset, indv, fixed_sp_sz=0):
-        for key, value in lever_cstr.items():
-            if key == "sp":
-                if indv[index_offset][0] not in value:
-                    sp = np.random.choice(value, 1)[0]
-                    indv[index_offset][0] = sp
-                    if len(self.lastcluster_dict) > 0:
-                        if fixed_sp_sz > 0:
-                            sp_sz = fixed_sp_sz
-                        else:
-                            sp_sz = self.lastcluster_dict[sp]
-                        indv[index_offset][1] = sp_sz
-            for i in range(index_offset + 1, index_offset + 7):
-                if indv[i][0] == key:
-                    change_idx = i
-                if indv[i][0] == value:
-                    valid_value = random.randint(1, indv[i][1])
-                self.lastcluster_dict[indv[i][0]] = indv[i][1]
-            if key in dimension_set:
-                if valid_value > indv[change_idx][1]:
-                    indv[change_idx][1] = valid_value
-
     def set_valid_value_v2(self, lever_cstr, index_offset, indv, fixed_sp_sz=0):
         num_free_order = 6
         num_free_par = 1
