@@ -77,9 +77,9 @@ class GAMMA(object):
                       area_pebuf_only=None, external_area_model=None, offchipBW=None, slevel_max=None, slevel_min=None,
                       precision=None):
         if l1_size:
-            self.l1_size = l1_size if l1_size > 0 else 2 ** 30
+            self.l1_size = self.memory_elements_to_use(l1_size, precision) if l1_size > 0 else 2 ** 30
         if l2_size:
-            self.l2_size = l2_size if l2_size > 0 else 2 ** 30
+            self.l2_size = self.memory_elements_to_use(l2_size, precision) if l2_size > 0 else 2 ** 30
         if num_pe:
             self.num_pe = num_pe
         if NocBW:
@@ -251,7 +251,7 @@ class GAMMA(object):
         powers_of_2 = [2 ** i for i in range(start_power, end_power + 1)]
 
         # Return a random power of 2 from the list
-        return np.random.choice(powers_of_2) if powers_of_2 else None
+        return np.random.choice(powers_of_2) if powers_of_2 else 1
 
     def sp_sz_precision_based_3_level(self):
 
@@ -1233,20 +1233,19 @@ class GAMMA(object):
         if precision == "INT2":
             return num_pe * 16
 
-    def l1_to_use(self, l1_size, precision):
+    def memory_elements_to_use(self, memory_size, precision):
 
-        if precision is None or precision == "FP32":
-            return l1_size
-        if precision == "FP16":
-            return l1_size * 2
-        if precision == "FP8":
-            return l1_size * 4
-        if precision == "INT32":
-            return l1_size
-        if precision == "INT16":
-            return l1_size * 2
-        if precision == "INT8":
-            return l1_size * 4
+        if precision is None or precision == "FP32" or precision == "INT32":
+            return int(memory_size * 8 / 32)
+        if precision == "FP16" or precision == "INT16":
+            return int(memory_size * 8 / 16)
+        if precision == "FP8" or precision == "INT8":
+            return int(memory_size * 8 / 8)
+        if precision == "FP4" or precision == "INT4":
+            return int(memory_size * 8 / 4)
+        if precision == "INT2" or precision == "FP2":
+            return int(memory_size * 8 / 2)
+
 
     def impose_halloffame(self, observe_value, target="latency_ave"):
         is_violated = False
