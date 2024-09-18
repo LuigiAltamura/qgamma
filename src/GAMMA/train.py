@@ -53,10 +53,10 @@ def train_model(model_defs, input_arg, chkpt_file='./chkpt', precisions=None, st
     constraints = {"area": opt.area_budget * 1e6}
     chkpt_list = []
     num_layer = 1
-
+    if opt.singlelayer != 0:
+        num_layer = opt.singlelayer
     for dimension in model_defs:
 
-        # ridefinire i valori di PE e l1 in base al tipo di quantizzazione
         if len(precisions):
             precision = precisions[num_layer - 1]
         else:
